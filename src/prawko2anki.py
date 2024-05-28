@@ -1,87 +1,67 @@
-# -*- coding: utf-8 -*-
-"""
-
-"""
-
 import os
 import sys
 import argparse
-from pyexcel_xlsx import get_data
+import polars as pl
 
-def main(input, media, output, category, system):
-
-    if not os.path.exists(output):
-        os.makedirs(os.path.join(output, "media"))
-
-    #media: %APPDATA%\Anki2\{profile}\collection.media
-    #fields: pytanie, odpowiedz, punkty
-    template = "{0}\t{1}\t{2}\n"
+def main(input, output, category):
     outfile = open(os.path.join(output, "prawo-jazdy-pytania.txt"), "w", encoding="utf-8")
-    copy_command = 'copy' if system == 'windows' else 'cp'
 
-    data = get_data(input)
-    for item in data["pytania"]:
-        kategorie = item[17].split(',')
-        if category in kategorie:
-            #numer_pytania = item[0]
-            #tresc_pytania = item[1]
-            pytanie = item[1]
-            odpowiedz_a = item[2]
-            odpowiedz_b = item[3]
-            odpowiedz_c = item[4]
-            odpowiedz_poprawna = item[13]
-            media_file = item[14]
-            liczba_punktow = item[16]
-            
+    df = pl.read_excel(input).filter(pl.col("Kategorie").is_not_null())
+
+    for input_question in df.rows(named=True):
+        categories = input_question["Kategorie"]
+        if category in categories:
+            try:
+                question_number = input_question["Numer pytania"]
+            except:
+                question_number = "?"
+            question = input_question["Pytanie"].replace('\n', ' ')
+            answer_a = input_question["Odpowiedź A"]
+            answer_b = input_question["Odpowiedź B"]
+            answer_c = input_question["Odpowiedź C"]
+            correct_answer = input_question["Poprawna odp"].replace('\n', ' ')
+            media_file = input_question["Media"]
+            # question_source = input_question["Źródło pytania"].replace('\n', ' ')
+            # comment = input_question["Jaki ma związek z bezpieczeństwem"].replace('\n', ' ')
+
+            question_html = '<div class="pytanie">' + question + '</div>'
             if media_file:
-                    
-                output_media_file = os.path.join(output, "media", media_file)
-                
-                if not os.path.exists(output_media_file):
-                    input_media_file = os.path.join(os.path.dirname(input), "media", media_file)
-                    if not os.path.exists(input_media_file):
-                        raise Exception("Missing media file: " + input_media_file)
-                    
-                    os.system(copy_command + ' "{0}" "{1}"'.format(input_media_file, output_media_file))
-                    if not os.path.exists(output_media_file):
-                        raise Exception("Cannot copy media file: " + input_media_file)
-            question = '<div class="pytanie">' + pytanie + '</div>'
-            if media_file:
-                question += '<div class="media">'
+                question_html += '<div class="media">'
                 if media_file.endswith(('.mp4','.wmv','.avi')):
-                    question += '[sound:' + media_file + ']'
-                elif media_file.endswith('.jpg'):
-                    question += '<img src="' + media_file + '" />'
+                    question_html += '[sound:' + media_file + ']'
+                elif media_file.endswith(('.jpg', '.JPG')):
+                    question_html += '<img src="' + media_file + '" />'
                 else:
                     raise Exception("Unexpected extension in media file: " + media_file)
-                question +='</div>'
-            if odpowiedz_a or odpowiedz_b or odpowiedz_c:
-                question += '<div class="odpowiedzi">'
-                if odpowiedz_a:
-                    question += '<span class="wariant">A</span>: ' + odpowiedz_a + '<br>'
-                if odpowiedz_b:
-                    question += '<span class="wariant">B</span>: ' + odpowiedz_b + '<br>'
-                if odpowiedz_c:
-                    question += '<span class="wariant">C</span>: ' + odpowiedz_c + '<br>'
-                question +='</div>'
+                question_html +='</div>'
+            if answer_a or answer_b or answer_c:
+                question_html += '<div class="odpowiedzi">'
+                if answer_a:
+                    question_html += '<span class="wariant">A</span>: ' + answer_a + '<br>'
+                if answer_b:
+                    question_html += '<span class="wariant">B</span>: ' + answer_b + '<br>'
+                if answer_c:
+                    question_html += '<span class="wariant">C</span>: ' + answer_c + '<br>'
+                question_html +='</div>'
             
             answer = '<div class="odpowiedz">'
-            if odpowiedz_poprawna == 'T':
+            if correct_answer == 'Tak':
                 answer += 'TAK'
-            elif odpowiedz_poprawna == 'N':
+            elif correct_answer == 'Nie':
                 answer += 'NIE'
-            elif odpowiedz_poprawna == 'A':
-                answer += 'A: ' + odpowiedz_a
-            elif odpowiedz_poprawna == 'B':
-                answer += 'B: ' + odpowiedz_b
-            elif odpowiedz_poprawna == 'C':
-                answer += 'C: ' + odpowiedz_c
+            elif correct_answer == 'A':
+                answer += 'A: ' + answer_a
+            elif correct_answer == 'B':
+                answer += 'B: ' + answer_b
+            elif correct_answer == 'C':
+                answer += 'C: ' + answer_c
             else:
-                raise Exception("Unexpected answer: " + odpowiedz_poprawna)
+                raise Exception("Unexpected answer: " + correct_answer)
             answer += '</div>'
-            outfile.write(template.format(question, answer, liczba_punktow))
-    #print(media)
-    #print(output)
+            
+            # outfile.write(f"{question_number}\t{question_html}\t{answer}\t{comment}\t{question_source}\n")
+            outfile.write(f"{question_number}\t{question_html}\t{answer}\n")
+
     outfile.close()
     return 0
 
@@ -89,22 +69,16 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input', 
         help='Input XLSX file name', required=True)
-    parser.add_argument('-m', '--media', 
-        help='Media directory', required=True)
     parser.add_argument('-o', '--output', 
         help='Output directory', required=True)
     parser.add_argument('-c', '--category', 
         help='License category', required=True)
-    parser.add_argument('-s', '--system', 
-        help='Operating system', required=False, default='windows', choices=['windows','linux'])
     args = parser.parse_args()
     return args
 
 if __name__ == '__main__':
     args = parse_arguments()
-    try:
-        sys.exit(main(input = args.input, media = args.media, output = args.output, category = args.category, system = args.system))
-    except Exception as exc:
-        print(exc, file=sys.stderr, end="\n")
-        sys.exit(1)
+
+    sys.exit(main(input = args.input, output = args.output, category = args.category))
+
     
